@@ -50,6 +50,7 @@ get_expanded_classification <- function(in_DF,colname){
     index = index + 1 # update iterative variable
     clasif <- results[[e]] # retrieve classification found for organism e
     out_DF[index ,which(colnames(out_DF) == colname)] <- e # write query name in first column
+    if(any(is.na(clasif))){next}
     # for each species, iterate over each global taxonomic range
     for (r in all_ranks) {
       r_classif <- clasif$name[grep(r,clasif$rank)] # given lineage for rank r
@@ -63,15 +64,41 @@ get_expanded_classification <- function(in_DF,colname){
 ```
 get_expanded_classification is a function which depends on {taxize} and {tidyverse}. It takes a data frame and a column name as inputs. get_expanded_classification retrieves the NCBI taxonomy of all the elements in the selected column and returns and expanded data frame where each row correspond to a unique query, and each column to its assigned taxonomy at each rank.
 
-For our purpose, the following chunk invokes get_expanded_classification to retrieve the full taxonomic classification of viruses and their hosts.
+For the moment we will only work with ssDNA viruses, to stay with low computation resources. So we make a search from our database:
 
+```{r CRESSDNAVIRICOTA}
 
-```{r viruses_hosts_classification}
-
-viruses_classification.df <- get_expanded_classification(refseq_viruses.tb, "Species")
-hosts_classification.df <- get_expanded_classification(refseq_viruses.tb, "Host")
+ssDNA.tb <- refseq_viruses.tb %>% dplyr::filter(grepl("ssDNA", Molecule_type))
+#ssDNA.tb_reduced <- ssDNA.tb[1600:1729,]
+ssDNA.tb
 
 ```
+
+The following chunk invokes get_expanded_classification to retrieve the full taxonomic classification of viruses and their hosts.
+
+
+```{r ssDNA_viruses_hosts_classification, include=FALSE}
+ 
+ssDNA_viruses_classification.df <- get_expanded_classification(ssDNA.tb, "Species")
+ssDNA_hosts_classification.df <- get_expanded_classification(ssDNA.tb, "Host")
+
+```
+
+And merge our outcomes
+
+```{r ssDNA_viruses_hosts_merge, include=FALSE}
+
+merge_viruses <- base::merge(ssDNA.tb,ssDNA_viruses_classification.df, by.x = "Species", by.y = "Species", no.dups = FALSE)
+merge_viruses_hosts <- base::merge(merge_viruses, ssDNA_hosts_classification.df, by.x = "Host", by.y = "Host", no.dups = FALSE)
+
+merge_viruses_hosts
+
+```
+
+
+
+
+
 
 
 
