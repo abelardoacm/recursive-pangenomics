@@ -7,8 +7,22 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+#Dependencies
 library(tidyverse)
 library(taxize)
+
+# Variables
+## Input
+anytaxon.csv <- "data/refseq_circoviruses.csv" #path to initial file in csv format containing information of a given taxon
+taxa_column <- "Species"
+## Include host ?
+include_hosts <- TRUE
+host_taxa_column <- "Host"
+## Output
+export_db <- TRUE
+output.csv <- "results/refseq_circoviruses_expanded_clasif.csv" #path to initial file in csv format containing information of a given taxon
+
 ```
 
 #### Recursive pangenomics
@@ -17,85 +31,49 @@ library(taxize)
 
 Several steps from the original pipeline were reviewed, some will be added while others were eliminated. In particular, to the date of january 2023 those of protein count filtering and functional annotation were completely removed. Moreover, the pre-pangenomic clustering was replaced by a whole new scope, a recursive pangenomics guided from the tips of a reference tree to its roots(?)... if such things exist.
 
-As a general description, these pangenomic analysis will start from the lowest hierarchy level of a given phylogeny (lets call it h1) and advance in a staged process where the originals genomes of h1 are compared in a first pangenomic round and then replaced by the resulting pangenomes for the hierarchichal level 2 (h2) and so on until the hypothetical root is reached. To determine which proteins will represent its cluster in the following hierarchy level, recursive medioid determinations will be performed.
+As a general description, these pangenomic analysis will start from the lowest hierarchy level of a given phylogeny (lets call it h1) and advance in a staged process where the originals genomes of h1 are compared in a first pangenomic round and then replaced by the resulting pangenomes for the hierarchical level 2 (h2) and so on until the hypothetical root is reached. To determine which proteins will represent its cluster in the following hierarchy level, recursive medioid determinations will be performed.
 
 ## Database 
 
 As the original project, recursive pangenomics will be focused on the evolutionary exploration of viruses with the goal of finding clusters of homologus proteins and their prevalence within lineages.
 
-For this purpose a "most inclusive" table (refseq_viruses.tb) of refseq genomes was downloaded from NCBI Virus at january 19th 2023. We will begin by properly reading and formatting it into a tibble. 
+We will begin by properly reading and formatting a table of ssDNA viruses into a tibble.
 
-```{r refseq_viruses.tb}
-
-refseq_viruses.tb <- readr::read_csv("data/refseq_viruses.csv")
-
+```{r anytaxon.tb, error=FALSE, warning=FALSE, message=FALSE}
+anytaxon.tb <- readr::read_csv(anytaxon.csv)
 ```
 
-One first goal is that refseq_viruses.tb could serve as a huge metadata tibble to consult. For that purpose it can be enriched with taxonomic information for both, the virus and its host. Such goal will be reached with the following function based on {taxize} functions.
+One first goal is to enrich our tibble with taxonomic information for both. Such goal will be reached with the local function get_expanded_classification, which is a function that depends on {taxize} and {tidyverse}. We will import it from source.
 
-```{r get_expanded_classification}
-
-get_expanded_classification <- function(in_DF,colname){
-  input_classification <- in_DF[,grep(colname,colnames(in_DF))] %>% dplyr::pull(colname) %>% unique() # generates a non redundant input vector for get_ids
-  results <- taxize::classification(input_classification, db = "ncbi", rows = 1, messages = FALSE) # save results of non interactive get_ids
-  results_unlisted <- results %>% unlist() # unlist results
-  all_ranks <- results_unlisted[grep("rank", names(results_unlisted))] %>% unname() %>% unique() # complete repertoire of taxonomic ranks
-  
-  out_DF <- matrix(nrow = length(results), ncol = length(all_ranks) + 1) %>% as.data.frame(.) # output data frame many rows as organisms, many columns as ranks
-  colnames(out_DF) <- c(colname, paste(colname, c(all_ranks), sep = "_")) # naming of taxonomic rank columns
-  
-  # for loop to match taxonomic classifications
-  index = 0 # iterative variable
-  for (e in input_classification) {
-    index = index + 1 # update iterative variable
-    clasif <- results[[e]] # retrieve classification found for organism e
-    out_DF[index ,which(colnames(out_DF) == colname)] <- e # write query name in first column
-    if(any(is.na(clasif))){next}
-    # for each species, iterate over each global taxonomic range
-    for (r in all_ranks) {
-      r_classif <- clasif$name[grep(r,clasif$rank)] # given lineage for rank r
-      r_outDF_index <- grep(r, colnames(out_DF)) # define column index of rank r
-      if(length(r_classif)==0){out_DF[index,r_outDF_index] <- ""}else{out_DF[index,r_outDF_index] <- r_classif[1]} # conditionally fill output df if a given rank was assigned for a given query
-    }
-  }
-  return(out_DF)
-}
-
+```{r source_functions}
+source("Functions.R")
 ```
-get_expanded_classification is a function which depends on {taxize} and {tidyverse}. It takes a data frame and a column name as inputs. get_expanded_classification retrieves the NCBI taxonomy of all the elements in the selected column and returns and expanded data frame where each row correspond to a unique query, and each column to its assigned taxonomy at each rank.
+
+It takes a data frame and a column name as input and then retrieves the NCBI taxonomy of all the elements in the selected column and returns and expanded data frame where each row correspond to a unique query, and each column to its assigned taxonomy at each rank.
 
 For the moment we will only work with ssDNA viruses, to stay with low computation resources. So we make a search from our database:
 
-```{r CRESSDNAVIRICOTA}
+The following chunk invokes get_expanded_classification() to retrieve the full taxonomic classification of anytaxon.csv members and it also merges the outcome with the initial tibble. 
 
-ssDNA.tb <- refseq_viruses.tb %>% dplyr::filter(grepl("ssDNA", Molecule_type))
-#ssDNA.tb_reduced <- ssDNA.tb[1600:1729,]
-ssDNA.tb
-
+```{r retrieve_classification, error=FALSE, warning=FALSE, message=FALSE}
+anytaxon_classification.df <- get_expanded_classification(anytaxon.tb, taxa_column)
+merge_anytaxon.df <- base::merge(anytaxon.tb, anytaxon_classification.df, by.x = taxa_column, by.y = taxa_column, no.dups = FALSE)
 ```
 
-The following chunk invokes get_expanded_classification to retrieve the full taxonomic classification of viruses and their hosts.
+As we will be mainly working with viruses, a optional chunk was added to retrieve and merge the taxonomic classification of hosts too.
 
-
-```{r ssDNA_viruses_hosts_classification, include=FALSE}
- 
-ssDNA_viruses_classification.df <- get_expanded_classification(ssDNA.tb, "Species")
-ssDNA_hosts_classification.df <- get_expanded_classification(ssDNA.tb, "Host")
-
+```{r if_include_hosts, error=FALSE, warning=FALSE, message=FALSE}
+if(include_hosts){
+  hosts_classification.df <- get_expanded_classification(anytaxon.tb, host_taxa_column)
+  merge_anytaxon.df <- base::merge(merge_anytaxon.df, hosts_classification.df, by.x = host_taxa_column, by.y = host_taxa_column, no.dups = FALSE)
+}
 ```
 
-And merge our outcomes
+At this point we have generated an extensive database enriched with classifications according to NCBI taxonomy, which we can export running the following chunk.
 
-```{r ssDNA_viruses_hosts_merge, include=FALSE}
-
-merge_viruses <- base::merge(ssDNA.tb,ssDNA_viruses_classification.df, by.x = "Species", by.y = "Species", no.dups = FALSE)
-merge_viruses_hosts <- base::merge(merge_viruses, ssDNA_hosts_classification.df, by.x = "Host", by.y = "Host", no.dups = FALSE)
-
-merge_viruses_hosts
-
+```{r database_export, error=FALSE, warning=FALSE, message=FALSE}
+if(export_db){write_csv(merge_anytaxon.df, file = output.csv)}
 ```
-
-
 
 
 
